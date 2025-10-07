@@ -14,6 +14,7 @@ import (
 // - 2025-05-02 15:04
 // - 2025-05-02 15:04:05
 // Missing components default to the first valid value (start of period).
+// If no timezone is provided the input is interpreted in America/Chicago (Central Time).
 func ParseFlexibleTime(input string) (time.Time, error) {
     s := strings.TrimSpace(input)
     if s == "" {
@@ -60,8 +61,20 @@ func ParseFlexibleTime(input string) (time.Time, error) {
         }
     }
 
-    combined := fmt.Sprintf("%s-%s-%sT%s:%s:%sZ", year, month, day, hour, min, sec)
-    t, err := time.Parse(time.RFC3339, combined)
+    // Build an RFC3339-like time without timezone info and parse it in the
+    // America/Chicago location so bare times are interpreted as Central Time.
+    combined := fmt.Sprintf("%s-%s-%sT%s:%s:%s", year, month, day, hour, min, sec)
+
+    loc, lerr := time.LoadLocation("America/Chicago")
+    if lerr != nil {
+        // if the zone database isn't available, fall back to local time
+        loc = time.Local
+    }
+
+    // Parse the combined time in the chosen location, then normalize to UTC
+    // to keep the rest of the codebase consistent with previous behavior.
+    layout := "2006-01-02T15:04:05"
+    t, err := time.ParseInLocation(layout, combined, loc)
     if err != nil {
         return time.Time{}, err
     }

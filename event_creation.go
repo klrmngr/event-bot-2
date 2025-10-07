@@ -141,7 +141,23 @@ func handleEventCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 
 
-	// Render message from template
+	// Ensure channel is recorded in the DB before inserting the event row. The
+	// events table has a foreign key to channels.discord_channel_id, so we must
+	// upsert the channel first to avoid FK constraint violations.
+	if err := upsertChannel(ch.ID, channelName); err != nil {
+		log.Printf("Failed to upsert channel before persisting event: %v", err)
+	}
+
+	// Persist a preliminary event row (message_id unknown yet) so the template renderer
+	// can find the event by channel and populate the template. If this fails we will
+	// fall back to the simple message rendering below.
+	prelimID, perr := CreateEvent(ch.ID, "", emoji, eventName, location, price, i.Member.User.ID, when)
+	if perr != nil {
+		log.Printf("Failed to persist preliminary event to DB: %v", perr)
+	}
+
+	// Render message from template (reads the event row we just created). If rendering
+	// fails, fall back to a simple plaintext message.
 	rendered, rerr := RenderEventMessage(ch.ID)
 	if rerr != nil {
 		// fallback to simple message
@@ -160,9 +176,21 @@ func handleEventCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		if err := upsertChannel(ch.ID, channelName); err != nil {
 			log.Printf("Failed to upsert channel: %v", err)
 		}
-		// Persist event to DB now that we have the message ID
-		if _, err := CreateEvent(ch.ID, sent.ID, emoji, eventName, location, price, i.Member.User.ID, when); err != nil {
-			log.Printf("Failed to persist event to DB: %v", err)
+		// Persist or update the event's message ID. If the preliminary insert succeeded
+		// update the row; otherwise create a new row including the message ID.
+		if perr == nil && prelimID != 0 {
+			if err := UpdateEventFieldByChannel(ch.ID, "message_id", sent.ID); err != nil {
+				log.Printf("Failed to update event message_id: %v", err)
+			}
+		} else {
+			if _, err := CreateEvent(ch.ID, sent.ID, emoji, eventName, location, price, i.Member.User.ID, when); err != nil {
+				log.Printf("Failed to persist event to DB: %v", err)
+			}
+		}
+		// Record the bot's message in the messages table. onMessageCreate ignores messages from the bot
+		// so we must explicitly insert the initial message sent by the bot here.
+		if err := InsertMessage(sent.ID, ch.ID, channelName, s.State.User.ID, s.State.User.Username, sent.Content); err != nil {
+			log.Printf("Failed to insert bot message into DB: %v", err)
 		}
 	}
 

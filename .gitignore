@@ -9,10 +9,13 @@
 *.test
 event-bot-2.exe
 event-bot-2.test
+event-bot
+event-bot-2
 coverage.out
 *.out
 *.prof
 *.sh
+*.pid
 
 /bin/
 /build/
