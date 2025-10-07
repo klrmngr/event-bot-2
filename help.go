@@ -35,6 +35,10 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		"8. `/change_notes` - Start an interactive notes update (DM flow).\n" +
 		"9. `/change_emoji [new_emoji]` - Change the event emoji.\n"
 
+	// Add poker commands to help
+	helpMessage += "10. `/session [in] [out] (location) (stakes)` - Log a poker session.\n"
+	helpMessage += "11. `/lifetime (user)` - Show lifetime poker stats for a user.\n"
+
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
