@@ -12,6 +12,7 @@ event-bot-2.test
 coverage.out
 *.out
 *.prof
+*.sh
 
 /bin/
 /build/
