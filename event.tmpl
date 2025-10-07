@@ -6,16 +6,13 @@ Organized by: {{.Organizer}}
 :dollar: Price: {{.Price}}
 
 :white_check_mark: Going: ({{len .Going}})
-{{range .Going}}{{.}}
-{{end}}
+{{range $i, $v := .Going}}{{if $i}} {{end}}{{$v}}{{end}}
 
 :question: Maybe: ({{len .Maybe}})
-{{range .Maybe}}{{.}}
-{{end}}
+{{range $i, $v := .Maybe}}{{if $i}} {{end}}{{$v}}{{end}}
 
 :x: Can't make it: ({{len .CantMakeIt}})
-{{range .CantMakeIt}}{{.}}
-{{end}}
+{{range $i, $v := .CantMakeIt}}{{if $i}} {{end}}{{$v}}{{end}}
 
 :pencil: Notes:
 {{range .Notes}}{{.}}
