@@ -66,6 +66,7 @@ func runBot(token, guildID string) error {
 		handleChangeEmojiCommand(s, i)
 		handleRSVPCommand(s, i)
 		handleHelpCommand(s, i)
+		handlePokerCommands(s, i)
 	})
 
 	// Open a websocket connection to Discord
@@ -84,6 +85,7 @@ func runBot(token, guildID string) error {
 	registerChangeEmoji(dg, guildID)
 	registerRSVP(dg, guildID)
 	registerHelp(dg, guildID)
+	registerPokerCommands(dg, guildID)
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
 	select {} // Block forever
@@ -110,4 +112,6 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 	// allow message-based slash-like commands for convenience
 	handleRSVPMessage(s, m)
+	// poker message commands
+	handlePokerMessage(s, m)
 }
