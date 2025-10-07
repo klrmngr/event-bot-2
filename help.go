@@ -27,7 +27,7 @@ func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	helpMessage := "**Available Commands:**\n" +
 		"1. `/help` - Get a list of available commands.\n" +
 		"2. `/event [name] [time] [location] [emoji] [price]` - Announce an event in the current channel.\n" +
-		"3. `/rsvp [yes/no/maybe] [user (optional)]` - RSVP to an event.\n" +
+		"3. `/rsvp [yes/no/maybe] (@user optional) - RSVP to an event; you can RSVP for others by mentioning them (e.g. <@123...>).\n" +
 		"4. `/change_name [name]` - Change the name of the event.\n" +
 		"5. `/change_date [new_date]` - Change the event's date/time in the current channel.\n" +
 		"6. `/change_location [new_location]` - Change the event location.\n" +

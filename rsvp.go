@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -98,6 +99,67 @@ func handleRSVPCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	})
+}
+
+// handleRSVPMessage parses plain-text messages that start with /rsvp and
+// supports the syntax: /rsvp (yes|no|maybe) (@user optional)
+// Mentions in message content are like <@715414244270538754> or <@!7154...>
+func handleRSVPMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if m.Author == nil || m.Author.ID == s.State.User.ID {
+		return
+	}
+	content := strings.TrimSpace(m.Content)
+	if !strings.HasPrefix(content, "/rsvp") {
+		return
+	}
+	parts := strings.Fields(content)
+	if len(parts) < 2 {
+		_, _ = s.ChannelMessageSend(m.ChannelID, "Usage: /rsvp (yes/no/maybe) (@user optional)")
+		return
+	}
+	response := strings.ToLower(parts[1])
+	if response != "yes" && response != "no" && response != "maybe" {
+		_, _ = s.ChannelMessageSend(m.ChannelID, "Invalid response. Please use yes, no, or maybe.")
+		return
+	}
+
+	// default to the message author
+	userID := m.Author.ID
+
+	// If the message has explicit mentions parsed by Discord, prefer that
+	if m.Mentions != nil && len(m.Mentions) > 0 {
+		userID = m.Mentions[0].ID
+	} else if len(parts) >= 3 {
+		// Try to parse a raw mention like <@123456789> or <@!123456789>
+		re := regexp.MustCompile(`^<@!?(\d+)>$`)
+		if sub := re.FindStringSubmatch(parts[2]); len(sub) == 2 {
+			userID = sub[1]
+		}
+	}
+
+	userMention := fmt.Sprintf("<@%s>", userID)
+
+	ev, err := GetEventByChannel(m.ChannelID)
+	if err != nil {
+		_, _ = s.ChannelMessageSend(m.ChannelID, "Could not find the event record.")
+		return
+	}
+	if err := UpsertResponse(ev.ID, userID, response); err != nil {
+		log.Printf("Failed to persist RSVP (message): %v", err)
+		_, _ = s.ChannelMessageSend(m.ChannelID, "Failed to save RSVP.")
+		return
+	}
+
+	// Re-render and edit the event message if present
+	if ev.MessageID != "" {
+		if rendered, rerr := RenderEventMessage(m.ChannelID); rerr == nil {
+			if _, err := s.ChannelMessageEdit(m.ChannelID, ev.MessageID, rendered); err != nil {
+				log.Printf("Failed to update RSVP message (message): %v", err)
+			}
+		}
+	}
+
+	_, _ = s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("RSVP updated for %s: %s", userMention, response))
 }
 
 // Helper to update RSVP section in message

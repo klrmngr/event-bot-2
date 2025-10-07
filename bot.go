@@ -107,4 +107,7 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if err := InsertMessage(m.ID, m.ChannelID, channelName, m.Author.ID, m.Author.Username, m.Content); err != nil {
 		log.Printf("failed to insert message into DB: %v", err)
 	}
+
+	// allow message-based slash-like commands for convenience
+	handleRSVPMessage(s, m)
 }
