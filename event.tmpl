@@ -1,20 +1,20 @@
 {{.Emoji}} {{.Title}}
-Organized by: @{{.Organizer}}
+Organized by: {{.Organizer}}
 
 :date: Date: {{.Dates}}
 :round_pushpin: Location: {{.Location}}
 :dollar: Price: {{.Price}}
 
 :white_check_mark: Going: ({{len .Going}})
-{{range .Going}}@{{.}}
+{{range .Going}}{{.}}
 {{end}}
 
 :question: Maybe: ({{len .Maybe}})
-{{range .Maybe}}@{{.}}
+{{range .Maybe}}{{.}}
 {{end}}
 
 :x: Can't make it: ({{len .CantMakeIt}})
-{{range .CantMakeIt}}@{{.}}
+{{range .CantMakeIt}}{{.}}
 {{end}}
 
 :pencil: Notes:

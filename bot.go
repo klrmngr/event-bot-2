@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -15,6 +17,46 @@ func runBot(token, guildID string) error {
 	dg.AddHandler(onReady)
 	dg.AddHandler(onMessageCreate)
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+		// Log commands and modal submits for auditing
+		switch i.Type {
+		case discordgo.InteractionApplicationCommand:
+			// safe to call ApplicationCommandData
+			name := i.ApplicationCommandData().Name
+			// build a short command text from options
+			var opts []string
+			for _, o := range i.ApplicationCommandData().Options {
+				if o.Value != nil {
+					opts = append(opts, fmt.Sprintf("%s=%v", o.Name, o.Value))
+				} else {
+					opts = append(opts, o.Name)
+				}
+			}
+			cmdText := name
+			if len(opts) > 0 {
+				cmdText = cmdText + " " + strings.Join(opts, " ")
+			}
+			// username is recorded/updated by DB layer; only pass user id and text here
+			InsertCommand(i.Member.User.ID, i.Member.User.Username, cmdText)
+		case discordgo.InteractionModalSubmit:
+			// If this is our change_notes modal, capture the notes text
+			if i.ModalSubmitData().CustomID == "change_notes_modal" {
+				var notes string
+				for _, row := range i.ModalSubmitData().Components {
+					if ar, ok := row.(*discordgo.ActionsRow); ok {
+						for _, comp := range ar.Components {
+							if ti, ok := comp.(*discordgo.TextInput); ok {
+								if ti.CustomID == "notes_input" {
+									notes = ti.Value
+								}
+							}
+						}
+					}
+				}
+				InsertCommand(i.Member.User.ID, i.Member.User.Username, "change_notes: "+notes)
+			}
+		}
+
+		// delegate to specific handlers
 		handleEventCommand(s, i)
 		handleChangeNameCommand(s, i)
 		handleChangeDateCommand(s, i)
@@ -56,4 +98,13 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 	log.Printf("[%s] %s: %s", m.ChannelID, m.Author.Username, m.Content)
+	// persist to DB
+	// try to fetch channel name (best-effort)
+	channelName := ""
+	if ch, cerr := s.Channel(m.ChannelID); cerr == nil && ch != nil {
+		channelName = ch.Name
+	}
+	if err := InsertMessage(m.ID, m.ChannelID, channelName, m.Author.ID, m.Author.Username, m.Content); err != nil {
+		log.Printf("failed to insert message into DB: %v", err)
+	}
 }

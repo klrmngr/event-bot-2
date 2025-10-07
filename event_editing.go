@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -33,13 +34,13 @@ func registerChangeDate(s *discordgo.Session, guildID string) {
 		Name:        "change_date",
 		Description: "Change the date/time of the event in the current channel",
 		Options: []*discordgo.ApplicationCommandOption{
-			{
-				Type:        discordgo.ApplicationCommandOptionString,
-				Name:        "new_date",
-				Description: "New date/time of event",
-				Required:    true,
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "new_date",
+					Description: "New date/time of event (flexible formats like YYYY-MM-DD HH:MM:SS)",
+					Required:    true,
+				},
 			},
-		},
 	}
 	_, err := s.ApplicationCommandCreate(s.State.User.ID, guildID, cmd)
 	if err != nil {
@@ -48,6 +49,9 @@ func registerChangeDate(s *discordgo.Session, guildID string) {
 }
 
 func handleChangeNameCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "change_name" {
 		return
 	}
@@ -59,72 +63,39 @@ func handleChangeNameCommand(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 	channelID := i.ChannelID
 
-	// Get the first message in the channel
-	msgs, err := s.ChannelMessages(channelID, 1, "", "", "")
-	if err != nil || len(msgs) == 0 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Could not find the event message.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
-	msg := msgs[0]
-
-	// Update the event message (replace first bold section with new name)
-	content := msg.Content
-	firstBoldStart := strings.Index(content, "**")
-	if firstBoldStart == -1 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Could not parse the event message format.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
-	firstBoldEndRel := strings.Index(content[firstBoldStart+2:], "**")
-	if firstBoldEndRel == -1 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Could not parse the event message format.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
-	firstBoldEnd := firstBoldStart + 2 + firstBoldEndRel
-	updatedContent := content[:firstBoldStart] + "**" + newName + "**" + content[firstBoldEnd+2:]
-
-	// Edit the message
-	_, err = s.ChannelMessageEdit(channelID, msg.ID, updatedContent)
-	if err != nil {
-		log.Printf("Failed to edit event message: %v", err)
-	}
-
 	// Update the channel name (sanitize to a valid channel name)
 	sanitized := strings.ReplaceAll(strings.ToLower(newName), " ", "-")
-	_, err = s.ChannelEdit(channelID, &discordgo.ChannelEdit{
-		Name: sanitized,
-	})
-	if err != nil {
+	if _, err := s.ChannelEdit(channelID, &discordgo.ChannelEdit{Name: sanitized}); err != nil {
 		log.Printf("Failed to edit channel name: %v", err)
+	}
+
+	// update DB
+	if err := UpdateEventFieldByChannel(channelID, "title", newName); err != nil {
+		log.Printf("Failed to update event title in DB: %v", err)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "Failed to update event in DB.", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		return
+	}
+
+	// re-render and edit the event message
+	if ev, err := GetEventByChannel(channelID); err == nil && ev.MessageID != "" {
+		if rendered, rerr := RenderEventMessage(channelID); rerr == nil {
+			_, _ = s.ChannelMessageEdit(channelID, ev.MessageID, rendered)
+		}
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: fmt.Sprintf("Event name changed to '%s'!", newName),
-			Flags:   discordgo.MessageFlagsEphemeral,
-		},
+		Data: &discordgo.InteractionResponseData{Content: fmt.Sprintf("Event name changed to '%s'!", newName), Flags: discordgo.MessageFlagsEphemeral},
 	})
 }
 
 func handleChangeDateCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "change_date" {
 		return
 	}
@@ -136,57 +107,37 @@ func handleChangeDateCommand(s *discordgo.Session, i *discordgo.InteractionCreat
 	}
 	channelID := i.ChannelID
 
-	// Get the first message in the channel
-	msgs, err := s.ChannelMessages(channelID, 1, "", "", "")
-	if err != nil || len(msgs) == 0 {
+	// parse flexible input
+	t, perr := ParseFlexibleTime(newDate)
+	if perr != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Could not find the event message.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+			Data: &discordgo.InteractionResponseData{Content: "Please provide a valid time (formats like YYYY-MM-DD HH:MM:SS).", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		return
 	}
-	msg := msgs[0]
+	newDate = t.Format(time.RFC3339)
 
-	// Find the "Time:" line and replace it
-	content := msg.Content
-	lines := strings.Split(content, "\n")
-	found := false
-	for idx, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "Time:") {
-			lines[idx] = fmt.Sprintf("Time: %s", newDate)
-			found = true
-			break
+	// update DB: store as text in "date" column
+	if err := UpdateEventFieldByChannel(channelID, "date", newDate); err != nil {
+		log.Printf("Failed to update event date in DB: %v", err)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "Failed to update event date in DB.", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		return
+	}
+
+	if ev, err := GetEventByChannel(channelID); err == nil && ev.MessageID != "" {
+		if rendered, rerr := RenderEventMessage(channelID); rerr == nil {
+			_, _ = s.ChannelMessageEdit(channelID, ev.MessageID, rendered)
 		}
 	}
-	if !found {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Could not find a Time: line in the event message.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
-		return
-	}
 
-	updatedContent := strings.Join(lines, "\n")
-
-	// Edit the message
-	_, err = s.ChannelMessageEdit(channelID, msg.ID, updatedContent)
-	if err != nil {
-		log.Printf("Failed to edit event message: %v", err)
-	}
-
+	// respond with Discord relative timestamp format
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{
-			Content: fmt.Sprintf("Event date changed to '%s'!", newDate),
-			Flags:   discordgo.MessageFlagsEphemeral,
-		},
+		Data: &discordgo.InteractionResponseData{Content: fmt.Sprintf("Event date changed to  <t:%d:R>!", t.Unix()), Flags: discordgo.MessageFlagsEphemeral},
 	})
 }
 
@@ -211,6 +162,9 @@ func registerChangeLocation(s *discordgo.Session, guildID string) {
 }
 
 func handleChangeLocationCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "change_location" {
 		return
 	}
@@ -222,35 +176,18 @@ func handleChangeLocationCommand(s *discordgo.Session, i *discordgo.InteractionC
 	}
 	channelID := i.ChannelID
 
-	msgs, err := s.ChannelMessages(channelID, 1, "", "", "")
-	if err != nil || len(msgs) == 0 {
+	if err := UpdateEventFieldByChannel(channelID, "location", newLocation); err != nil {
+		log.Printf("Failed to update event location in DB: %v", err)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not find the event message.", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{Content: "Failed to update event location in DB.", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		return
 	}
-	msg := msgs[0]
-	content := msg.Content
-	start := strings.Index(content, "**:round_pushpin: Location:**")
-	if start == -1 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not find a Location: line.", Flags: discordgo.MessageFlagsEphemeral},
-		})
-		return
-	}
-	start += len("**:round_pushpin: Location:**")
-	end := strings.Index(content[start:], "**")
-	if end == -1 {
-		end = len(content)
-	} else {
-		end = start + end
-	}
-	updated := content[:start] + " " + newLocation + content[end:]
-	_, err = s.ChannelMessageEdit(channelID, msg.ID, updated)
-	if err != nil {
-		log.Printf("Failed to edit event message: %v", err)
+	if ev, err := GetEventByChannel(channelID); err == nil && ev.MessageID != "" {
+		if rendered, rerr := RenderEventMessage(channelID); rerr == nil {
+			_, _ = s.ChannelMessageEdit(channelID, ev.MessageID, rendered)
+		}
 	}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -279,6 +216,9 @@ func registerChangePrice(s *discordgo.Session, guildID string) {
 }
 
 func handleChangePriceCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "change_price" {
 		return
 	}
@@ -290,36 +230,18 @@ func handleChangePriceCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 	}
 	channelID := i.ChannelID
 
-	msgs, err := s.ChannelMessages(channelID, 1, "", "", "")
-	if err != nil || len(msgs) == 0 {
+	if err := UpdateEventFieldByChannel(channelID, "price", newPrice); err != nil {
+		log.Printf("Failed to update event price in DB: %v", err)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not find the event message.", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{Content: "Failed to update event price in DB.", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		return
 	}
-	msg := msgs[0]
-	content := msg.Content
-	start := strings.Index(content, "**:dollar: Price:**")
-	if start == -1 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not find a Price: line.", Flags: discordgo.MessageFlagsEphemeral},
-		})
-		return
-	}
-	start += len("**:dollar: Price:**")
-	// find next blank line or end
-	next := strings.Index(content[start:], "\n\n")
-	if next == -1 {
-		next = len(content)
-	} else {
-		next = start + next
-	}
-	updated := content[:start] + " " + newPrice + content[next:]
-	_, err = s.ChannelMessageEdit(channelID, msg.ID, updated)
-	if err != nil {
-		log.Printf("Failed to edit event message: %v", err)
+	if ev, err := GetEventByChannel(channelID); err == nil && ev.MessageID != "" {
+		if rendered, rerr := RenderEventMessage(channelID); rerr == nil {
+			_, _ = s.ChannelMessageEdit(channelID, ev.MessageID, rendered)
+		}
 	}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -329,6 +251,7 @@ func handleChangePriceCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 
 // Register and handle change_notes (minimal DM flow — simplified: ask user for notes in channel)
 func registerChangeNotes(s *discordgo.Session, guildID string) {
+	// create a slash command without options; we'll show a modal to collect notes
 	cmd := &discordgo.ApplicationCommand{
 		Name:        "change_notes",
 		Description: "Change the notes for the event in the current channel",
@@ -340,14 +263,80 @@ func registerChangeNotes(s *discordgo.Session, guildID string) {
 }
 
 func handleChangeNotesCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// If this is a modal submit for our change_notes modal, handle the save/update flow
+	if i.Type == discordgo.InteractionModalSubmit {
+		if i.ModalSubmitData().CustomID == "change_notes_modal" {
+			channelID := i.ChannelID
+			// extract text input value from modal components
+			var notes string
+			for _, row := range i.ModalSubmitData().Components {
+				if ar, ok := row.(*discordgo.ActionsRow); ok {
+					for _, comp := range ar.Components {
+						if ti, ok := comp.(*discordgo.TextInput); ok {
+							if ti.CustomID == "notes_input" {
+								notes = ti.Value
+							}
+						}
+					}
+				}
+			}
+
+			if err := UpdateEventFieldByChannel(channelID, "description", notes); err != nil {
+				log.Printf("Failed to update event notes in DB: %v", err)
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseChannelMessageWithSource,
+					Data: &discordgo.InteractionResponseData{Content: "Failed to update event notes in DB.", Flags: discordgo.MessageFlagsEphemeral},
+				})
+				return
+			}
+
+			if ev, err := GetEventByChannel(channelID); err == nil && ev.MessageID != "" {
+				if rendered, rerr := RenderEventMessage(channelID); rerr == nil {
+					_, _ = s.ChannelMessageEdit(channelID, ev.MessageID, rendered)
+				}
+			}
+
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{Content: "Notes updated.", Flags: discordgo.MessageFlagsEphemeral},
+			})
+			return
+		}
+		// not our modal -> ignore
+		return
+	}
+
+	// Otherwise, if this is the slash command invocation, open a modal
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "change_notes" {
 		return
 	}
-	// For simplicity (no async DM flow here), respond ephemerally instructing the user how to update notes manually.
-	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-		Type: discordgo.InteractionResponseChannelMessageWithSource,
-		Data: &discordgo.InteractionResponseData{Content: "Please DM the bot with the new notes (feature not implemented in Go).", Flags: discordgo.MessageFlagsEphemeral},
-	})
+
+	// Respond with a modal asking for notes/description
+	modal := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "change_notes_modal",
+			Title:    "Change event notes",
+			Components: []discordgo.MessageComponent{
+				&discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					&discordgo.TextInput{
+						CustomID:    "notes_input",
+						Label:       "Notes / Description",
+						Style:       discordgo.TextInputParagraph,
+						Required:    false,
+						Placeholder: "Add or edit notes for this event...",
+						MaxLength:   2000,
+					},
+				}},
+			},
+		},
+	}
+	if err := s.InteractionRespond(i.Interaction, modal); err != nil {
+		log.Printf("failed to open modal: %v", err)
+	}
 }
 
 // Register and handle change_emoji
@@ -371,6 +360,9 @@ func registerChangeEmoji(s *discordgo.Session, guildID string) {
 }
 
 func handleChangeEmojiCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "change_emoji" {
 		return
 	}
@@ -382,48 +374,18 @@ func handleChangeEmojiCommand(s *discordgo.Session, i *discordgo.InteractionCrea
 	}
 	channelID := i.ChannelID
 
-	msgs, err := s.ChannelMessages(channelID, 1, "", "", "")
-	if err != nil || len(msgs) == 0 {
+	if err := UpdateEventFieldByChannel(channelID, "emoji", newEmoji); err != nil {
+		log.Printf("Failed to update event emoji in DB: %v", err)
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not find the event message.", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{Content: "Failed to update event emoji in DB.", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		return
 	}
-	msg := msgs[0]
-	content := msg.Content
-	firstBoldStart := strings.Index(content, "**")
-	if firstBoldStart == -1 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not parse event title format.", Flags: discordgo.MessageFlagsEphemeral},
-		})
-		return
-	}
-	firstBoldEndRel := strings.Index(content[firstBoldStart+2:], "**")
-	if firstBoldEndRel == -1 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not parse event title format.", Flags: discordgo.MessageFlagsEphemeral},
-		})
-		return
-	}
-	firstBoldEnd := firstBoldStart + 2 + firstBoldEndRel
-	boldContent := content[firstBoldStart+2 : firstBoldEnd]
-	// find space between emoji and name
-	spaceIdx := strings.Index(boldContent, " ")
-	if spaceIdx == -1 {
-		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "Could not parse event title format.", Flags: discordgo.MessageFlagsEphemeral},
-		})
-		return
-	}
-	eventName := boldContent[spaceIdx+1:]
-	updated := content[:firstBoldStart] + "**" + newEmoji + " " + eventName + "**" + content[firstBoldEnd+2:]
-	_, err = s.ChannelMessageEdit(channelID, msg.ID, updated)
-	if err != nil {
-		log.Printf("Failed to edit event message: %v", err)
+	if ev, err := GetEventByChannel(channelID); err == nil && ev.MessageID != "" {
+		if rendered, rerr := RenderEventMessage(channelID); rerr == nil {
+			_, _ = s.ChannelMessageEdit(channelID, ev.MessageID, rendered)
+		}
 	}
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,

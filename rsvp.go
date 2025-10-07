@@ -34,6 +34,9 @@ func registerRSVP(s *discordgo.Session, guildID string) {
 }
 
 func handleRSVPCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "rsvp" {
 		return
 	}
@@ -61,33 +64,31 @@ func handleRSVPCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	userMention := fmt.Sprintf("<@%s>", userID)
 
-	// Get the first message in the channel
-	msgs, err := s.ChannelMessages(i.ChannelID, 1, "", "", "")
-	if err != nil || len(msgs) == 0 {
+	// Persist the response in the DB
+	ev, err := GetEventByChannel(i.ChannelID)
+	if err != nil {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "Could not find the event message.",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
+			Data: &discordgo.InteractionResponseData{Content: "Could not find the event record.", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		return
 	}
-	msg := msgs[0]
-	content := msg.Content
-
-	// Define section markers
-	sections := map[string]string{
-		"yes":   "**:white_check_mark: Going:**",
-		"maybe": "**:question: Maybe:**",
-		"no":    "**:x: Can't make it:**",
+	if err := UpsertResponse(ev.ID, userID, response); err != nil {
+		log.Printf("Failed to persist RSVP: %v", err)
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "Failed to save RSVP.", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		return
 	}
 
-	// Update RSVP section
-	updatedContent := updateRSVPSection(content, sections[response], userMention)
-	_, err = s.ChannelMessageEdit(i.ChannelID, msg.ID, updatedContent)
-	if err != nil {
-		log.Printf("Failed to update RSVP: %v", err)
+	// Re-render message and edit
+	if ev.MessageID != "" {
+		if rendered, rerr := RenderEventMessage(i.ChannelID); rerr == nil {
+			if _, err := s.ChannelMessageEdit(i.ChannelID, ev.MessageID, rendered); err != nil {
+				log.Printf("Failed to update RSVP message: %v", err)
+			}
+		}
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

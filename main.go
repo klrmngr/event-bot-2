@@ -31,6 +31,16 @@ func main() {
 	}
 
 	// Create and run the bot
+	// Initialize database
+	if err := InitDB(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer func() {
+		if db != nil {
+			_ = db.Close()
+		}
+	}()
+
 	if err := runBot(token, guildID); err != nil {
 		log.Fatalf("Bot error: %v", err)
 	}

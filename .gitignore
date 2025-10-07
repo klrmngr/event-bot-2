@@ -1,0 +1,61 @@
+# .gitignore for a Go project
+# Created to exclude build artifacts, editor/OS files, and sensitive env files
+
+### Binaries and build output
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+event-bot-2.exe
+event-bot-2.test
+coverage.out
+*.out
+*.prof
+
+/bin/
+/build/
+/dist/
+/tmp/
+
+### Package and vendor
+/vendor/
+/pkg/
+
+### Go modules and cache
+# keep go.mod and go.sum tracked
+# Go build cache and module cache are outside the repo by default
+
+### Editor/IDE files
+.vscode/
+.idea/
+*.iml
+
+### OS files
+.DS_Store
+Thumbs.db
+
+### Node/npm
+node_modules/
+
+### Environment / secret files
+.env
+.env.*.local
+.env.local
+.envrc
+secrets.yml
+*.key
+
+### Logs and temp files
+*.log
+*.tmp
+*.cache
+
+### Terraform
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+
+### Misc
+coverage/
+dist/

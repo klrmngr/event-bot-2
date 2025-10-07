@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
@@ -22,7 +23,7 @@ func registerEventCreation(s *discordgo.Session, guildID string) {
 			{
 				Type:        discordgo.ApplicationCommandOptionString,
 				Name:        "time",
-				Description: "General time/date of the event",
+				Description: "Time/date of the event (flexible formats like YYYY-MM-DD HH:MM:SS; partials accepted e.g. 2025-05)",
 				Required:    true,
 			},
 			{
@@ -53,17 +54,22 @@ func registerEventCreation(s *discordgo.Session, guildID string) {
 }
 
 func handleEventCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	// only handle application command interactions here
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "event" {
 		return
 	}
 	options := i.ApplicationCommandData().Options
-	var eventName, time, location, price, emoji string
+	var eventName, location, price, emoji string
+	var timeStr string
 	for _, opt := range options {
 		switch opt.Name {
 		case "event_name":
 			eventName = opt.StringValue()
 		case "time":
-			time = opt.StringValue()
+			timeStr = opt.StringValue()
 		case "location":
 			location = opt.StringValue()
 		case "price":
@@ -77,6 +83,16 @@ func handleEventCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	if emoji == "" {
 		emoji = ":loudspeaker:"
+	}
+
+	// parse flexible time input (several date formats) before creating channel
+	when, perr := ParseFlexibleTime(timeStr)
+	if perr != nil {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{Content: "Please provide a valid time (formats like YYYY-MM-DD HH:MM:SS).", Flags: discordgo.MessageFlagsEphemeral},
+		})
+		return
 	}
 
 	// Find "Active Plans" category
@@ -124,10 +140,30 @@ func handleEventCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	msg := fmt.Sprintf("%s **%s**\nTime: %s\nLocation: %s\nPrice: %s\nCreated by: <@%s>", emoji, eventName, time, location, price, i.Member.User.ID)
-	_, err = s.ChannelMessageSend(ch.ID, msg)
+
+	// Render message from template
+	rendered, rerr := RenderEventMessage(ch.ID)
+	if rerr != nil {
+		// fallback to simple message
+		timeDisplay := "TBD"
+		if !when.IsZero() {
+			timeDisplay = when.Format(time.RFC3339)
+		}
+		rendered = fmt.Sprintf("%s **%s**\nTime: %s\nLocation: %s\nPrice: %s\nCreated by: <@%s>", emoji, eventName, timeDisplay, location, price, i.Member.User.ID)
+	}
+
+	sent, err := s.ChannelMessageSend(ch.ID, rendered)
 	if err != nil {
 		log.Printf("Failed to send event message: %v", err)
+	} else {
+		// ensure channel is recorded
+		if err := upsertChannel(ch.ID, channelName); err != nil {
+			log.Printf("Failed to upsert channel: %v", err)
+		}
+		// Persist event to DB now that we have the message ID
+		if _, err := CreateEvent(ch.ID, sent.ID, emoji, eventName, location, price, i.Member.User.ID, when); err != nil {
+			log.Printf("Failed to persist event to DB: %v", err)
+		}
 	}
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{

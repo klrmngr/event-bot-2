@@ -18,6 +18,9 @@ func registerHelp(s *discordgo.Session, guildID string) {
 }
 
 func handleHelpCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
 	if i.ApplicationCommandData().Name != "help" {
 		return
 	}
