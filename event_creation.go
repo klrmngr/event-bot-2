@@ -116,7 +116,7 @@ func handleEventCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		{
 			ID:    i.Member.User.ID,
 			Type:  discordgo.PermissionOverwriteTypeMember,
-			Allow: discordgo.PermissionViewChannel | discordgo.PermissionSendMessages | discordgo.PermissionManageChannels ,
+			Allow: discordgo.PermissionAllChannel ,
 			Deny:  0,
 		},
 	}
