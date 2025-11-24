@@ -47,7 +47,7 @@ func RenderEventMessage(channelID string) (string, error) {
 				// Append Discord timestamp template so callers can include the relative timestamp in Discord
 				human := tChicago.Format("January 2, 2006, 3:04 PM")
 				discord := fmt.Sprintf("<t:%d:R>", ev.Date.Unix())
-				return fmt.Sprintf("%s, %s", human, discord)
+				return fmt.Sprintf("%s CST, %s", human, discord)
 			}
 			return "TBD"
 		}(),
