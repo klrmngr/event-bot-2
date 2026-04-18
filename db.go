@@ -149,7 +149,7 @@ func GetEventByChannel(channelID string) (*Event, error) {
 	if db == nil {
 		return nil, fmt.Errorf("db not initialized")
 	}
-	q := `SELECT id, discord_channel_id, discord_message_id, emoji, date, title, location, price, description, author_id FROM events WHERE discord_channel_id = $1 LIMIT 1`
+	q := `SELECT id, discord_channel_id, discord_message_id, emoji, date, title, location, price, description, author_id FROM events WHERE discord_channel_id = $1 ORDER BY id DESC LIMIT 1`
 	var e Event
 	var nt sql.NullTime
 	err := db.QueryRow(q, channelID).Scan(&e.ID, &e.ChannelID, &e.MessageID, &e.Emoji, &nt, &e.Title, &e.Location, &e.Price, &e.Description, &e.AuthorID)
