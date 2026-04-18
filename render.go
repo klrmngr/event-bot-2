@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
-	"io/ioutil"
-	"path/filepath"
 	"text/template"
 	"time"
 )
+
+//go:embed event.tmpl
+var eventTmplContent string
+
+var eventTmpl = template.Must(template.New("event").Parse(eventTmplContent))
 
 // RenderEventMessage builds the event message text from the template and DB row.
 func RenderEventMessage(channelID string) (string, error) {
@@ -64,17 +68,8 @@ func RenderEventMessage(channelID string) (string, error) {
 		}(),
 	}
 
-	tmplPath := filepath.Join(".", "event.tmpl")
-	b, err := ioutil.ReadFile(tmplPath)
-	if err != nil {
-		return "", err
-	}
-	t, err := template.New("event").Parse(string(b))
-	if err != nil {
-		return "", err
-	}
 	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
+	if err := eventTmpl.Execute(&buf, data); err != nil {
 		return "", err
 	}
 	return buf.String(), nil
