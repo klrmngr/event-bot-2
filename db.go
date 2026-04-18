@@ -173,16 +173,10 @@ func UpsertResponse(eventID int64, userID, responseType string) error {
 	if !allowed[resp] {
 		return fmt.Errorf("invalid response type: %s", responseType)
 	}
-	var existingID int64
-	err := db.QueryRow("SELECT id FROM event_responses WHERE event_id = $1 AND user_id = $2", eventID, userID).Scan(&existingID)
-	if err == sql.ErrNoRows {
-		_, err := db.Exec("INSERT INTO event_responses (event_id, user_id, response_type) VALUES ($1,$2,$3)", eventID, userID, resp)
-		return err
-	}
-	if err != nil {
-		return err
-	}
-	_, err = db.Exec("UPDATE event_responses SET response_type = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2", resp, existingID)
+	// requires UNIQUE (event_id, user_id) on event_responses
+	_, err := db.Exec(`INSERT INTO event_responses (event_id, user_id, response_type) VALUES ($1,$2,$3)
+		ON CONFLICT (event_id, user_id) DO UPDATE SET response_type = $3, updated_at = CURRENT_TIMESTAMP`,
+		eventID, userID, resp)
 	return err
 }
 
