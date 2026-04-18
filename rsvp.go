@@ -162,22 +162,3 @@ func handleRSVPMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	_, _ = s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("RSVP updated for %s: %s", userMention, response))
 }
 
-// Helper to update RSVP section in message
-func updateRSVPSection(content, sectionMarker, userMention string) string {
-	lines := strings.Split(content, "\n")
-	var newLines []string
-	foundSection := false
-	for _, line := range lines {
-		if strings.HasPrefix(line, sectionMarker) {
-			foundSection = true
-			if !strings.Contains(line, userMention) {
-				line += " " + userMention
-			}
-		}
-		newLines = append(newLines, line)
-	}
-	if !foundSection {
-		newLines = append(newLines, sectionMarker+" "+userMention)
-	}
-	return strings.Join(newLines, "\n")
-}
