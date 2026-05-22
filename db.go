@@ -184,6 +184,28 @@ func UpsertResponse(eventID int64, userID, responseType string) error {
 	return err
 }
 
+// GetUserResponse returns a user's RSVP for an event, or "" if none.
+func GetUserResponse(eventID int64, userID string) (string, error) {
+	if db == nil {
+		return "", fmt.Errorf("db not initialized")
+	}
+	var resp string
+	err := db.QueryRow(`SELECT response_type FROM event_responses WHERE event_id = $1 AND user_id = $2`, eventID, userID).Scan(&resp)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return resp, err
+}
+
+// DeleteResponse removes a user's RSVP for an event.
+func DeleteResponse(eventID int64, userID string) error {
+	if db == nil {
+		return fmt.Errorf("db not initialized")
+	}
+	_, err := db.Exec(`DELETE FROM event_responses WHERE event_id = $1 AND user_id = $2`, eventID, userID)
+	return err
+}
+
 // GetResponsesForEvent returns lists of user IDs for each response type.
 func GetResponsesForEvent(eventID int64) (going, maybe, cant []string, err error) {
 	if db == nil {

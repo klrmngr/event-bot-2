@@ -4,8 +4,11 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"log"
 	"text/template"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 //go:embed event.tmpl
@@ -73,4 +76,19 @@ func RenderEventMessage(channelID string) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+func refreshEventMessage(s *discordgo.Session, channelID string) {
+	ev, err := GetEventByChannel(channelID)
+	if err != nil || ev.MessageID == "" {
+		return
+	}
+	rendered, err := RenderEventMessage(channelID)
+	if err != nil {
+		log.Printf("Failed to render event message: %v", err)
+		return
+	}
+	if _, err := s.ChannelMessageEdit(channelID, ev.MessageID, rendered); err != nil {
+		log.Printf("Failed to update event message: %v", err)
+	}
 }

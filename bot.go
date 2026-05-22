@@ -13,9 +13,12 @@ func runBot(token, guildID string) error {
 	if err != nil {
 		return err
 	}
+	dg.Identify.Intents = discordgo.IntentGuildMessages | discordgo.IntentGuildMessageReactions
 
 	dg.AddHandler(onReady)
 	dg.AddHandler(onMessageCreate)
+	dg.AddHandler(onReactionAdd)
+	dg.AddHandler(onReactionRemove)
 	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		// Log commands and modal submits for auditing
 		switch i.Type {
