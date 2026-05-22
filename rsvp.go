@@ -83,14 +83,7 @@ func handleRSVPCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Re-render message and edit
-	if ev.MessageID != "" {
-		if rendered, rerr := RenderEventMessage(i.ChannelID); rerr == nil {
-			if _, err := s.ChannelMessageEdit(i.ChannelID, ev.MessageID, rendered); err != nil {
-				log.Printf("Failed to update RSVP message: %v", err)
-			}
-		}
-	}
+	refreshEventMessage(s, i.ChannelID)
 
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -150,14 +143,7 @@ func handleRSVPMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	// Re-render and edit the event message if present
-	if ev.MessageID != "" {
-		if rendered, rerr := RenderEventMessage(m.ChannelID); rerr == nil {
-			if _, err := s.ChannelMessageEdit(m.ChannelID, ev.MessageID, rendered); err != nil {
-				log.Printf("Failed to update RSVP message (message): %v", err)
-			}
-		}
-	}
+	refreshEventMessage(s, m.ChannelID)
 
 	_, _ = s.ChannelMessageSend(m.ChannelID, fmt.Sprintf("RSVP updated for %s: %s", userMention, response))
 }

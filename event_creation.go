@@ -162,6 +162,8 @@ func handleEventCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 		if _, err := CreateEvent(ch.ID, sent.ID, emoji, eventName, location, price, i.Member.User.ID, when); err != nil {
 			log.Printf("Failed to persist event to DB: %v", err)
+		} else {
+			addRSVPReactions(s, ch.ID, sent.ID)
 		}
 		if err := InsertMessage(sent.ID, ch.ID, channelName, s.State.User.ID, s.State.User.Username, sent.Content); err != nil {
 			log.Printf("Failed to insert bot message into DB: %v", err)
